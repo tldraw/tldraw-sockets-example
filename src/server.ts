@@ -23,19 +23,21 @@ export default class SyncParty implements Party.Server {
 		const msg = JSON.parse(message as string)
 		switch (msg.type) {
 			case 'update': {
-				const {
-					changes: { added, updated, removed },
-				} = msg.update as HistoryEntry<TLRecord>
 				try {
-					// Try to merge the update into our local store
-					for (const record of Object.values(added)) {
-						this.records[record.id] = record
-					}
-					for (const [, to] of Object.values(updated)) {
-						this.records[to.id] = to
-					}
-					for (const record of Object.values(removed)) {
-						delete this.records[record.id]
+					for (const update of msg.updates) {
+						const {
+							changes: { added, updated, removed },
+						} = update as HistoryEntry<TLRecord>
+						// Try to merge the update into our local store
+						for (const record of Object.values(added)) {
+							this.records[record.id] = record
+						}
+						for (const [, to] of Object.values(updated)) {
+							this.records[to.id] = to
+						}
+						for (const record of Object.values(removed)) {
+							delete this.records[record.id]
+						}
 					}
 					// If it works, broadcast the update to all other clients
 					this.party.broadcast(message, [sender.id])

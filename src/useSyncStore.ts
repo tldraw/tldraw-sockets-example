@@ -5,9 +5,13 @@ import {
 	TLStoreWithStatus,
 	createTLStore,
 	defaultShapeUtils,
+	throttle,
+	uniqueId,
 } from '@tldraw/tldraw'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import PartySocket from 'partysocket'
+
+const clientId = uniqueId()
 
 export function useSyncStore({
 	hostUrl,
@@ -30,11 +34,12 @@ export function useSyncStore({
 		status: 'loading',
 	})
 
-	const socket = useMemo(() => {
-		return new PartySocket({ host: hostUrl, room: `${roomId}_${version}` })
-	}, [hostUrl, roomId, version])
-
 	useEffect(() => {
+		const socket = new PartySocket({
+			host: hostUrl,
+			room: `${roomId}_${version}`,
+		})
+
 		setStoreWithStatus({ status: 'loading' })
 
 		const unsubs: (() => void)[] = []
@@ -67,7 +72,9 @@ export function useSyncStore({
 		const handleMessage = (message: MessageEvent<any>) => {
 			try {
 				const data = JSON.parse(message.data)
-				if (data.clientId === socket.id) return
+				if (data.clientId === clientId) {
+					return
+				}
 
 				switch (data.type) {
 					case 'init': {
@@ -80,24 +87,26 @@ export function useSyncStore({
 					}
 					case 'update': {
 						try {
-							store.mergeRemoteChanges(() => {
-								const {
-									changes: { added, updated, removed },
-								} = data.update as HistoryEntry<TLRecord>
+							for (const update of data.updates) {
+								store.mergeRemoteChanges(() => {
+									const {
+										changes: { added, updated, removed },
+									} = update as HistoryEntry<TLRecord>
 
-								for (const record of Object.values(added)) {
-									store.put([record])
-								}
-								for (const [, to] of Object.values(updated)) {
-									store.put([to])
-								}
-								for (const record of Object.values(removed)) {
-									store.remove([record.id])
-								}
-							})
+									for (const record of Object.values(added)) {
+										store.put([record])
+									}
+									for (const [, to] of Object.values(updated)) {
+										store.put([to])
+									}
+									for (const record of Object.values(removed)) {
+										store.remove([record.id])
+									}
+								})
+							}
 						} catch (e) {
 							console.error(e)
-							socket.send(JSON.stringify({ type: 'recovery' }))
+							socket.send(JSON.stringify({ clientId, type: 'recovery' }))
 						}
 						break
 					}
@@ -107,11 +116,24 @@ export function useSyncStore({
 			}
 		}
 
+		const pendingChanges: HistoryEntry<TLRecord>[] = []
+
+		const sendChanges = throttle(() => {
+			if (pendingChanges.length === 0) return
+			socket.send(
+				JSON.stringify({
+					clientId,
+					type: 'update',
+					updates: pendingChanges,
+				})
+			)
+			pendingChanges.length = 0
+		}, 32)
+
 		const handleChange: StoreListener<TLRecord> = (event) => {
 			if (event.source !== 'user') return
-			socket.send(
-				JSON.stringify({ clientId: socket.id, type: 'update', update: event })
-			)
+			pendingChanges.push(event)
+			sendChanges()
 		}
 
 		socket.addEventListener('open', handleOpen)
@@ -137,8 +159,9 @@ export function useSyncStore({
 		return () => {
 			unsubs.forEach((fn) => fn())
 			unsubs.length = 0
+			socket.close()
 		}
-	}, [socket, store])
+	}, [store])
 
 	return storeWithStatus
 }
