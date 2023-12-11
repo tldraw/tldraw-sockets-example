@@ -70,7 +70,7 @@ export function useSyncStore({
 				if (data.clientId === socket.id) return
 
 				switch (data.type) {
-					case 'initialize': {
+					case 'init': {
 						store.loadSnapshot(data.snapshot)
 						break
 					}
