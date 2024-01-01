@@ -9,7 +9,7 @@ import {
 	uniqueId,
 } from '@tldraw/tldraw'
 import { useEffect, useState } from 'react'
-import PartySocket from 'partysocket'
+import { usePartySocket } from 'partysocket/react'
 
 const clientId = uniqueId()
 
@@ -34,12 +34,12 @@ export function useSyncStore({
 		status: 'loading',
 	})
 
-	useEffect(() => {
-		const socket = new PartySocket({
-			host: hostUrl,
-			room: `${roomId}_${version}`,
-		})
+	const socket = usePartySocket({
+		host: hostUrl,
+		room: `${roomId}_${version}`,
+	})
 
+	useEffect(() => {
 		setStoreWithStatus({ status: 'loading' })
 
 		const unsubs: (() => void)[] = []
@@ -159,9 +159,8 @@ export function useSyncStore({
 		return () => {
 			unsubs.forEach((fn) => fn())
 			unsubs.length = 0
-			socket.close()
 		}
-	}, [store])
+	}, [socket, store])
 
 	return storeWithStatus
 }
